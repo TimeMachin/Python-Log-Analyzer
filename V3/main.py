@@ -3,6 +3,7 @@ import sys
 import ctypes
 import os
 from PyQt6.QtWidgets import QApplication
+from PyQt6 import QtGui
 from main_window import MainWindow
 
 def is_admin():
@@ -38,6 +39,7 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
+    app.setWindowIcon(QtGui.QIcon('./icon.ico'))
     win = MainWindow()
     win.showMaximized()
     sys.exit(app.exec())
