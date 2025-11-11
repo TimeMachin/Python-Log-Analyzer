@@ -444,17 +444,16 @@ class MainWindow(QMainWindow):
         self.worker = None
 
         # suspicious event highlighting map (EventID -> color)
-        # you can expand this dictionary
         self.suspicious_map = {
-            "4624": QColor("#1a3b1a"),  # successful logon (green)
-            "4625": QColor("#3b391a"),  # failed logon (yellow)
-            "4688": QColor("#1a263b"),  # new process (blue)
-            "7045": QColor("#3b1a1a"),  # service installed (red)
-            "1102": QColor("#3b1a1a"),  # event log clear (red)
+            "4624": QColor("#25b525"),  # successful logon (green)
+            "4625": QColor("#6f6a2c"),  # failed logon (yellow)
+            "4688": QColor("#4d6999"),  # new process (blue)
+            "7045": QColor("#c30b0b"),  # service installed (red)
+            "1102": QColor("#3b1a1a"),  # event log clear (dark red)
         }
 
     # ---------------------------
-    # Header context menu (Option 1)
+    # Header context menu
     # ---------------------------
     def on_header_context_menu(self, pos):
         header = self.table.horizontalHeader()
