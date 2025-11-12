@@ -16,12 +16,15 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 from main_window import MainWindow
 
+# Checks if the current process is running with administrator privileges on Windows
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
     except Exception:
         return False
 
+# Restarts the application with administrator privileges (Windows only)
+# Uses ShellExecuteW to request elevation and re-run the script with admin rights
 def restart_as_admin():
     script = os.path.abspath(sys.argv[0])
     pythonw = sys.executable.replace("python.exe", "pythonw.exe")
@@ -32,6 +35,8 @@ def restart_as_admin():
         print("Elevation failed:", e)
 
 
+# Loads and reads a QSS stylesheet file from the given file path
+# Returns the stylesheet content as a string, or an empty string if the file is not found
 def load_stylesheet(path: str) -> str:
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -43,7 +48,6 @@ def load_stylesheet(path: str) -> str:
 if __name__ == "__main__":
     if not is_admin():
         restart_as_admin()
-
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon("icon.ico"))
     style_path = os.path.join(os.path.dirname(__file__), "style.qss")

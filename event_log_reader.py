@@ -27,6 +27,8 @@ try:
 except Exception:
     Evtx = None
 
+# Creates a temporary copy of an .evtx event log file to avoid issues with locked files
+# Returns the path to the temporary copy
 def safe_copy_evtx(path):
     """Copy file to temp to avoid locked-file issues."""
     dest_dir = tempfile.gettempdir()
@@ -35,6 +37,9 @@ def safe_copy_evtx(path):
     shutil.copy2(path, dest)
     return dest
 
+# Reads an .evtx event log file and extracts events up to maxEvents limit
+# Returns a list of dictionaries containing raw XML representation of each event
+# Requires python-evtx library to be installed
 def read_evtx_summary(path, maxEvents=5000):
     """
     Read an .evtx file and return a list of dicts with key '__raw_xml' (xml string).
@@ -54,6 +59,9 @@ def read_evtx_summary(path, maxEvents=5000):
                 break
     return rows
 
+# Wrapper class around win32evtlog library for reading Windows Event Log channels
+# Provides methods to access local event log channels and extract event information
+# Requires pywin32 library to be installed
 class EventLogReader:
     """
     Wrapper around win32evtlog to read channels (if pywin32 is installed).
@@ -62,6 +70,9 @@ class EventLogReader:
     def __init__(self):
         pass
 
+    # Reads events from a Windows event log channel (e.g., 'System', 'Security', 'Application')
+    # Extracts event details like Source, EventID, TimeCreated, Level, Message, and Computer
+    # Returns a list of dictionaries containing up to maxEvents records from the channel
     def readChannel(self, channel, maxEvents=5000):
         if win32evtlog is None:
             raise RuntimeError("pywin32 (win32evtlog) is required to read channels. Install pywin32.")
