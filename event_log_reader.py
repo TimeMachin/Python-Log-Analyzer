@@ -1,13 +1,14 @@
+"""
+EVENT LOG READER FILE
+Provides:
+- Security copies of event files
+- Parsing of events
 # event_log_reader.py
 """
-Event log reader helper.
-Provides:
-- EventLogReader.readChannel(channel_name, maxEvents)
-- read_evtx_summary(path, maxEvents)
 
-This module tries to use pywin32 (win32evtlog) for channels and python-evtx for files.
-"""
-
+# ---------------------------
+# Import libraries and modules
+# ---------------------------
 import os
 import tempfile
 import shutil
@@ -36,56 +37,39 @@ def safe_copy_evtx(path):
 
 def read_evtx_summary(path, maxEvents=5000):
     """
-    Read an .evtx file and return a list of dicts with at least:
-    { 'Source': ..., 'EventID': ..., 'TimeCreated': ..., 'Level': ..., 'Message': ..., '__raw_xml': ... }
-    Uses python-evtx if available.
+    Read an .evtx file and return a list of dicts with key '__raw_xml' (xml string).
+    Requires python-evtx (pip install python-evtx).
     """
     rows = []
     if not os.path.exists(path):
         raise FileNotFoundError(f"{path} not found")
     if Evtx is None:
         raise RuntimeError("python-evtx is not installed. Install with: pip install python-evtx")
-
     tmp = safe_copy_evtx(path)
     with Evtx(tmp) as log:
         for i, rec in enumerate(log.records()):
             xml = rec.xml()
-            rows.append({
-                "Source": "",  # filled later by caller parsing XML
-                "EventID": "",
-                "TimeCreated": "",
-                "Level": "",
-                "Message": (xml[:200] if xml else ""),
-                "__raw_xml": xml
-            })
+            rows.append({"__raw_xml": xml})
             if i + 1 >= maxEvents:
                 break
     return rows
 
 class EventLogReader:
     """
-    Wrapper around win32evtlog to read channels.
-    readChannel(channel_name, maxEvents) -> list of dicts
-    (Deprecated for XML needs; prefer reading the channel file via read_evtx_summary after copying)
+    Wrapper around win32evtlog to read channels (if pywin32 is installed).
+    Returns list of dicts with keys: Source, EventID, TimeCreated, Level, Message, Computer
     """
     def __init__(self):
         pass
 
     def readChannel(self, channel, maxEvents=5000):
-        """
-        Read a Windows event channel using win32evtlog.
-        channel: like "Application", "System", "Security"
-        returns list of dicts with keys: Source, EventID, TimeCreated, Level, Message, Computer
-        """
         if win32evtlog is None:
             raise RuntimeError("pywin32 (win32evtlog) is required to read channels. Install pywin32.")
-
-        server = None  # local machine
+        server = None  # local
         try:
             hand = win32evtlog.OpenEventLog(server, channel)
         except Exception:
             raise
-
         flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         records = []
         total = 0

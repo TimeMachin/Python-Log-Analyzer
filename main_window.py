@@ -1,34 +1,48 @@
-# main_window.py
+"""
+MAIN WINDOW FILE
+Provides:
+- Shapping of the main window
+- Calls to program main functions
+- Security copies of event files
+- Loading and exporting
+- Population of tables
+- XML Tree view
+- Filtering functions
+"""
+
+# ---------------------------
+# Import libraries and modules
+# ---------------------------
 import os
 import re
 import tempfile
 import shutil
 from xml.etree import ElementTree as ET
-
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QThread, QRegularExpression, QPoint
+from datetime import datetime
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QThread
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLineEdit, QComboBox, QLabel, QTableWidget,
     QTableWidgetItem, QFileDialog, QMessageBox, QTextEdit, QDialog,
     QDialogButtonBox, QHeaderView, QTreeWidget, QTreeWidgetItem,
-    QSizePolicy, QStyle, QMenu, QInputDialog
+    QSizePolicy, QMenu
 )
-from PyQt6.QtGui import QFont, QTextCursor, QSyntaxHighlighter, QTextCharFormat, QColor, QBrush, QAction
+from PyQt6.QtGui import QColor, QBrush, QAction, QIcon
 
-# Import reader module if present
+# Import of the reader module to make it easier to use
 try:
     import event_log_reader as elr_mod
 except Exception:
     elr_mod = None
 
-# python-evtx fallback import (only for files)
+# python-evtx fallback for files running without it being installed
 try:
     from Evtx.Evtx import Evtx
 except Exception:
     Evtx = None
 
 # ---------------------------
-# Helper: copy file to temp
+# Helpers
 # ---------------------------
 def safe_copy_to_temp(path):
     dest_dir = tempfile.gettempdir()
@@ -38,7 +52,7 @@ def safe_copy_to_temp(path):
     return dest
 
 # ---------------------------
-# ReaderWorker
+# Reader verification, either function or module
 # ---------------------------
 class ReaderWorker(QObject):
     finished = pyqtSignal(list)
@@ -52,6 +66,7 @@ class ReaderWorker(QObject):
     def run(self):
         try:
             p = self.path_or_channel
+            # file path
             if isinstance(p, str) and p.lower().endswith(".evtx"):
                 if elr_mod and hasattr(elr_mod, "read_evtx_summary"):
                     rows = elr_mod.read_evtx_summary(p, self.max_events)
@@ -64,14 +79,14 @@ class ReaderWorker(QObject):
                         for i, r in enumerate(log.records()):
                             xml = r.xml()
                             rows.append({"__raw_xml": xml})
-                            if i+1 >= self.max_events:
+                            if i + 1 >= self.max_events:
                                 break
                     self.finished.emit(rows)
                     return
                 self.error.emit("No available file reader. Install python-evtx or provide read_evtx_summary.")
                 return
             else:
-                # treat as channel name -> copy real file from System32\winevt\Logs
+                # channel name -> map to System32\winevt\Logs\<channel>.evtx
                 system_root = os.environ.get("SystemRoot", r"C:\Windows")
                 candidate = os.path.join(system_root, "System32", "winevt", "Logs", f"{p}.evtx")
                 if not os.path.exists(candidate):
@@ -88,7 +103,7 @@ class ReaderWorker(QObject):
                         for i, r in enumerate(log.records()):
                             xml = r.xml()
                             rows.append({"__raw_xml": xml})
-                            if i+1 >= self.max_events:
+                            if i + 1 >= self.max_events:
                                 break
                     self.finished.emit(rows)
                     return
@@ -99,32 +114,29 @@ class ReaderWorker(QObject):
             self.error.emit(traceback.format_exc())
 
 # ---------------------------
-# XML tree functions (previously implemented)
+# XML tree population
 # ---------------------------
 def add_xml_element_to_tree(tree_parent, element, level=0, expand_level=1):
     tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
     item = QTreeWidgetItem([f"<{tag}>"])
-
-    # Attributes shown as "Attribute: name = value" (option 2A)
+    # attributes
     for k, v in element.attrib.items():
         attr_item = QTreeWidgetItem([f'Attribute: {k} = "{v}"'])
         item.addChild(attr_item)
-
-    # Text node
+    # text
     text = (element.text or "").strip()
     if text:
         text_item = QTreeWidgetItem([f'Text: "{text}"'])
         item.addChild(text_item)
-
-    # Recurse children
+    # children
     for child in element:
         child_item = add_xml_element_to_tree(child, child, level + 1, expand_level)
         item.addChild(child_item)
-
     if level <= expand_level:
         item.setExpanded(True)
     return item
 
+# Parse the XML tree with the raw data
 def populate_tree_from_xml(tree_widget, xml_text, expand_level=1):
     tree_widget.clear()
     if not xml_text:
@@ -138,7 +150,6 @@ def populate_tree_from_xml(tree_widget, xml_text, expand_level=1):
         except Exception:
             tree_widget.addTopLevelItem(QTreeWidgetItem(["<unparsable XML>"]))
             return
-
     top = add_xml_element_to_tree(None, root, 0, expand_level)
     tree_widget.addTopLevelItem(top)
     tree_widget.expandItem(top)
@@ -146,11 +157,9 @@ def populate_tree_from_xml(tree_widget, xml_text, expand_level=1):
         top.child(i).setExpanded(True)
     tree_widget.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
 
-# helper to highlight matches in tree (case-insensitive or regex)
+# Filter and search auxiliar highlight
 def highlight_tree_matches(tree_widget, term, use_regex=False):
-    term_raw = term
     if not term:
-        # clear backgrounds
         def clear(item):
             item.setBackground(0, QBrush())
             for i in range(item.childCount()):
@@ -158,12 +167,10 @@ def highlight_tree_matches(tree_widget, term, use_regex=False):
         for i in range(tree_widget.topLevelItemCount()):
             clear(tree_widget.topLevelItem(i))
         return
-
     try:
         pattern = re.compile(term, re.IGNORECASE) if use_regex else None
     except re.error:
         pattern = None
-
     def check_and_mark(item):
         text = item.text(0) or ""
         matched = False
@@ -176,10 +183,8 @@ def highlight_tree_matches(tree_widget, term, use_regex=False):
         else:
             if term.lower() in text.lower():
                 matched = True
-        # set background if matched
         if matched:
-            item.setBackground(0, QBrush(QColor("#FFD44D")))  # soft yellow
-            # ensure parents expanded to show it
+            item.setBackground(0, QBrush(QColor("#FFD44D")))
             parent = item.parent()
             while parent is not None:
                 parent.setExpanded(True)
@@ -188,47 +193,114 @@ def highlight_tree_matches(tree_widget, term, use_regex=False):
             item.setBackground(0, QBrush())
         for i in range(item.childCount()):
             check_and_mark(item.child(i))
-
     for i in range(tree_widget.topLevelItemCount()):
         check_and_mark(tree_widget.topLevelItem(i))
 
 # ---------------------------
-# Modal xml dialog
+# Modal FilterDialog for advanced filters
 # ---------------------------
-class XmlDialog(QDialog):
-    def __init__(self, xml_text, parent=None):
+class FilterDialog(QDialog):
+    def __init__(self, parent=None, get_fields_callable=None):
+        # Modal configuration
         super().__init__(parent)
-        self.setWindowTitle("Event XML (detail)")
-        self.resize(900, 600)
-        layout = QVBoxLayout(self)
-        self.text = QTextEdit()
-        self.text.setReadOnly(True)
-        self.text.setFontFamily("Consolas")
-        self.text.setFontPointSize(10)
-        layout.addWidget(self.text)
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        copy_btn = QPushButton("Copy XML")
-        btns.addButton(copy_btn, QDialogButtonBox.ButtonRole.ActionRole)
-        layout.addWidget(btns)
-        btns.rejected.connect(self.reject)
-        copy_btn.clicked.connect(self.copy_xml)
-        pretty = xml_text or ""
-        try:
-            from xml.dom import minidom
-            txt = re.sub(r'\sxmlns="[^"]+"', '', pretty, count=1)
-            dom = minidom.parseString(txt)
-            pretty = dom.toprettyxml(indent="  ")
-            pretty = "\n".join([line for line in pretty.splitlines() if line.strip() != ""])
-        except Exception:
-            pass
-        self.text.setPlainText(pretty)
+        self.setWindowTitle("Advanced filters")
+        self.setModal(True)
+        self.resize(640, 360)
+        self.get_fields_callable = get_fields_callable
+        self.setWindowIcon(QIcon("filters.ico"))
 
-    def copy_xml(self):
-        from PyQt6.QtWidgets import QApplication
-        QApplication.clipboard().setText(self.text.toPlainText())
+        # Headers section for filter (layout)
+        layout = QVBoxLayout(self)
+        self.rules_table = QTableWidget()
+        self.rules_table.setColumnCount(4)
+        self.rules_table.setHorizontalHeaderLabels(["Field", "Operator", "Value", "Value2 (if between)"])
+        self.rules_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.rules_table)
+        
+        # Configuration of layout controls
+        controls = QWidget()
+        c_layout = QHBoxLayout()
+        c_layout.setContentsMargins(0,0,0,0)
+        controls.setLayout(c_layout)
+
+        # Setting functionality buttons
+        self.add_btn = QPushButton("+ Add Rule")
+        self.apply_btn = QPushButton("Apply")
+        self.clear_btn = QPushButton("Clear")
+        self.cancel_btn = QPushButton("Cancel")
+
+        # styling properties used by stylesheet in main.py
+        self.apply_btn.setProperty('primary', True)
+        self.clear_btn.setProperty('secondary', True)
+
+        # Positioning of buttopns in modal view
+        c_layout.addWidget(self.add_btn)
+        c_layout.addStretch(1)
+        c_layout.addWidget(self.apply_btn)
+        c_layout.addWidget(self.clear_btn)
+        c_layout.addWidget(self.cancel_btn)
+        layout.addWidget(controls)
+
+        # Connection between rules functionality and visual elements
+        self.add_btn.clicked.connect(self.add_empty_rule)
+        self.apply_btn.clicked.connect(self.on_apply)
+        self.clear_btn.clicked.connect(self.on_clear)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.rules = []     # rules counter list
+
+    def refresh_fields(self):
+        if callable(self.get_fields_callable):
+            return self.get_fields_callable()
+        return ["Source", "EventID", "TimeCreated", "Level", "Message", "Computer"]
+
+    def add_empty_rule(self):
+        row = self.rules_table.rowCount()
+        self.rules_table.insertRow(row)
+        # Field combobox
+        field_combo = QComboBox()
+        field_combo.addItems(self.refresh_fields())
+        self.rules_table.setCellWidget(row, 0, field_combo)
+        # Operator
+        op_combo = QComboBox()
+        op_combo.addItems(["=", "!=", ">", "<", ">=", "<=", "contains", "startswith", "endswith", "regex", "between"])
+        self.rules_table.setCellWidget(row, 1, op_combo)
+        # Value inputs
+        val_edit = QLineEdit()
+        val_edit.setProperty('dialoginput', True)
+        self.rules_table.setCellWidget(row, 2, val_edit)
+        val2_edit = QLineEdit()
+        val2_edit.setProperty('dialoginput', True)
+        self.rules_table.setCellWidget(row, 3, val2_edit)
+
+    def get_rules(self):
+        rules = []
+        for r in range(self.rules_table.rowCount()):
+            fw = self.rules_table.cellWidget(r, 0)
+            ow = self.rules_table.cellWidget(r, 1)
+            vw = self.rules_table.cellWidget(r, 2)
+            v2w = self.rules_table.cellWidget(r, 3)
+            if not fw or not ow:
+                continue
+            field = fw.currentText()
+            op = ow.currentText()
+            val = vw.text().strip() if vw else ""
+            val2 = v2w.text().strip() if v2w else ""
+            # require at least a value for most ops
+            if val == "" and op not in ("is empty", "is not empty"):
+                continue
+            rules.append({"field": field, "op": op, "value": val, "value2": val2})
+        return rules
+
+    def on_apply(self):
+        self.rules = self.get_rules()
+        self.accept()
+
+    def on_clear(self):
+        self.rules_table.setRowCount(0)
+        self.rules = []
 
 # ---------------------------
-# parse XML to canonical dict
+# Parse event XML to canonical dict (Source, EventID, TimeCreated, Level, Message, other EventData fields)
 # ---------------------------
 def parse_event_xml_to_dict(xml_text):
     if not xml_text:
@@ -241,7 +313,6 @@ def parse_event_xml_to_dict(xml_text):
             root = ET.fromstring(xml_text)
         except Exception:
             return {}
-
     result = {}
     system = None
     for child in root:
@@ -253,7 +324,6 @@ def parse_event_xml_to_dict(xml_text):
             if elem.tag.lower().endswith("system"):
                 system = elem
                 break
-
     if system is not None:
         for elem in system:
             lname = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
@@ -277,7 +347,6 @@ def parse_event_xml_to_dict(xml_text):
                 text = elem.text or ""
                 if text:
                     result["Level"] = text.strip()
-
     # Message detection
     msg = ""
     for elem in root.iter():
@@ -293,7 +362,6 @@ def parse_event_xml_to_dict(xml_text):
             if elem.tag.split('}')[-1].lower() == "message":
                 msg = (elem.text or "").strip()
                 break
-
     eventdata = {}
     for elem in root.iter():
         if elem.tag.split('}')[-1].lower() == "eventdata":
@@ -304,50 +372,24 @@ def parse_event_xml_to_dict(xml_text):
                     key = name if name else f"Data_{len(eventdata)+1}"
                     eventdata[key] = text
             break
-
     if msg:
         result["Message"] = msg
     for k, v in eventdata.items():
         if k not in result:
             result[k] = v
-
     for k in ["Source", "EventID", "TimeCreated", "Level", "Message", "Computer"]:
         if k not in result:
             result[k] = ""
     return result
 
 # ---------------------------
-# Filtering engine helpers
-# ---------------------------
-class ColumnFilterDialog(QDialog):
-    def __init__(self, parent=None, column_name="Column"):
-        super().__init__(parent)
-        self.setWindowTitle(f"Filter: {column_name}")
-        self.resize(360, 120)
-        layout = QVBoxLayout(self)
-        # combo for type
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(["Contains", "Equals", "Starts with", "Ends with", "Regex"])
-        self.input = QLineEdit()
-        self.input.setPlaceholderText("Type filter value (or regex)")
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        layout.addWidget(self.type_combo)
-        layout.addWidget(self.input)
-        layout.addWidget(btns)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-
-    def result(self):
-        return self.type_combo.currentText(), self.input.text()
-
-# ---------------------------
-# MainWindow
+# Main window
 # ---------------------------
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Log Analyzer")
-        self.resize(1200, 800)
+        self.setWindowTitle("Windows Event Log Analyzer")
+        self.resize(1300, 850)
 
         # Top bar
         top = QWidget()
@@ -358,14 +400,14 @@ class MainWindow(QMainWindow):
         top.setFixedHeight(42)
         top.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        # Controls
+        # Controls (no quick filters; single Filters button)
         self.channel_combo = QComboBox()
         self.channel_combo.addItems(["Application", "System", "Security"])
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Global search (use prefix re: for regex)")
+        self.search_edit.setPlaceholderText("Global search")
         self.search_scope = QComboBox()
         self.search_scope.addItems(["All", "Table only", "XML only"])
-        self.filter_clear_btn = QPushButton("Clear All Filters")
+        self.filters_btn = QPushButton("Filters")
         self.load_btn = QPushButton("Load Events")
         self.load_file_btn = QPushButton("Load From File")
         self.export_btn = QPushButton("Export CSV")
@@ -374,7 +416,7 @@ class MainWindow(QMainWindow):
         top_l.addWidget(self.channel_combo)
         top_l.addWidget(self.search_edit, 1)
         top_l.addWidget(self.search_scope)
-        top_l.addWidget(self.filter_clear_btn)
+        top_l.addWidget(self.filters_btn)
         top_l.addWidget(self.load_btn)
         top_l.addWidget(self.load_file_btn)
         top_l.addWidget(self.export_btn)
@@ -390,7 +432,7 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
 
-        # enable context menu on header for column filters (Option 1)
+        # header context menu for column filters (simple)
         header = self.table.horizontalHeader()
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self.on_header_context_menu)
@@ -427,7 +469,7 @@ class MainWindow(QMainWindow):
         self.load_file_btn.clicked.connect(self.load_from_file)
         self.export_btn.clicked.connect(self.export_csv)
         self.search_edit.textChanged.connect(self.on_search_changed)
-        self.filter_clear_btn.clicked.connect(self.clear_all_filters)
+        self.filters_btn.clicked.connect(self.open_filters_dialog)
         self.table.cellClicked.connect(self.on_row_clicked)
         self.table.cellDoubleClicked.connect(self.on_row_double_clicked)
 
@@ -436,8 +478,9 @@ class MainWindow(QMainWindow):
         self.canonical_cols = ["Source", "EventID", "TimeCreated", "Level", "Message", "Computer"]
         self.header_keys = ["Source", "EventID", "TimeCreated", "Level", "Message"]
 
-        # filters: {col_index: (type_str, value)}
-        self.active_filters = {}
+        # filters
+        self.active_filters = {}           # column filters {col_index: (type_str, value)}
+        self.advanced_filters = []         # structured advanced filters (list of dicts)
 
         # threading
         self.thread = None
@@ -445,11 +488,11 @@ class MainWindow(QMainWindow):
 
         # suspicious event highlighting map (EventID -> color)
         self.suspicious_map = {
-            "4624": QColor("#25b525"),  # successful logon (green)
-            "4625": QColor("#6f6a2c"),  # failed logon (yellow)
-            "4688": QColor("#4d6999"),  # new process (blue)
-            "7045": QColor("#c30b0b"),  # service installed (red)
-            "1102": QColor("#3b1a1a"),  # event log clear (dark red)
+            "4624": QColor("#1a3b1a"),
+            "4625": QColor("#3b391a"),
+            "4688": QColor("#1a263b"),
+            "7045": QColor("#3b1a1a"),
+            "1102": QColor("#3b1a1a"),
         }
 
     # ---------------------------
@@ -462,75 +505,133 @@ class MainWindow(QMainWindow):
             return
         column_name = header.model().headerData(logical_index, Qt.Orientation.Horizontal)
         menu = QMenu(self)
-        act_filter = QAction(f"Filter '{column_name}'...", self)
+        act_filter_by_value = QAction(f"Filter by value from selection...", self)
         act_clear = QAction(f"Clear filter '{column_name}'", self)
-        menu.addAction(act_filter)
+        menu.addAction(act_filter_by_value)
         menu.addAction(act_clear)
         action = menu.exec(header.mapToGlobal(pos))
-        if action == act_filter:
-            dlg = ColumnFilterDialog(self, column_name=str(column_name))
-            if dlg.exec() == QDialog.DialogCode.Accepted:
-                ftype, fval = dlg.result()
-                if fval.strip() == "":
-                    # empty -> treat as clear
-                    if logical_index in self.active_filters:
-                        del self.active_filters[logical_index]
-                else:
-                    self.active_filters[logical_index] = (ftype, fval)
-                self.apply_filters_and_search()
+        if action == act_filter_by_value:
+            sel = self.table.selectedRanges()
+            if sel:
+                rng = sel[0]
+                r = rng.topRow()
+                c = logical_index
+                it = self.table.item(r, c)
+                if it:
+                    value = it.text()
+                    self.active_filters[logical_index] = ("Contains", value)
+                    self.apply_filters_and_search()
         elif action == act_clear:
             if logical_index in self.active_filters:
                 del self.active_filters[logical_index]
                 self.apply_filters_and_search()
 
     # ---------------------------
-    # Search & Filters integration
+    # Open advanced Filters dialog (modal)
+    # ---------------------------
+    def open_filters_dialog(self):
+        dlg = FilterDialog(self, get_fields_callable=self.get_available_fields)
+        dlg.refresh_fields()
+        # pre-populate
+        for rule in self.advanced_filters:
+            dlg.add_empty_rule()
+            r = dlg.rules_table.rowCount() - 1
+            fw = dlg.rules_table.cellWidget(r, 0)
+            ow = dlg.rules_table.cellWidget(r, 1)
+            vw = dlg.rules_table.cellWidget(r, 2)
+            v2w = dlg.rules_table.cellWidget(r, 3)
+            try:
+                if fw:
+                    idx = fw.findText(rule.get('field'))
+                    if idx >= 0:
+                        fw.setCurrentIndex(idx)
+            except Exception:
+                pass
+            try:
+                if ow:
+                    idx2 = ow.findText(rule.get('op'))
+                    if idx2 >= 0:
+                        ow.setCurrentIndex(idx2)
+            except Exception:
+                pass
+            if vw:
+                vw.setText(rule.get('value', ''))
+            if v2w:
+                v2w.setText(rule.get('value2', ''))
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.advanced_filters = dlg.rules or []
+            if self.advanced_filters:
+                self.filters_btn.setStyleSheet('background-color: #154e7a; color: white;')
+            else:
+                self.filters_btn.setStyleSheet('')
+            self.apply_filters_and_search()
+
+    def get_available_fields(self):
+        fields = list(self.header_keys)
+        for c in self.canonical_cols:
+            if c not in fields:
+                fields.insert(0, c)
+        seen = set()
+        res = []
+        for f in fields:
+            if f not in seen:
+                seen.add(f)
+                res.append(f)
+        return res
+
+    # ---------------------------
+    # Search & filters orchestration
     # ---------------------------
     def on_search_changed(self, txt):
-        # apply search (debounce not necessary for now)
-        self.apply_filters_and_search()
-
-    def clear_all_filters(self):
-        self.active_filters = {}
-        self.search_edit.clear()
         self.apply_filters_and_search()
 
     def apply_filters_and_search(self):
-        """
-        Central function: applies column filters (AND) and then global search (scope)
-        """
-        # precompute filter function
-        def row_matches_filters(row_idx):
-            # check active column filters
+        def check_advanced(rec):
+            for rule in self.advanced_filters:
+                field = rule.get('field')
+                op = rule.get('op')
+                val = rule.get('value')
+                val2 = rule.get('value2', '')
+                field_val = rec.get(field, '')
+                if not self.evaluate_rule(field_val, op, val, val2, field):
+                    return False
+            return True
+
+        def check_column_filters(row_idx):
             for col_idx, (ftype, fval) in self.active_filters.items():
                 try:
                     item = self.table.item(row_idx, col_idx)
-                    cell_text = item.text() if item else ""
+                    cell_text = item.text() if item else ''
                 except Exception:
-                    cell_text = ""
+                    cell_text = ''
                 if not self._match_filter(cell_text, ftype, fval):
                     return False
             return True
 
         search_text = self.search_edit.text().strip()
         use_regex = False
-        regex_text = ""
-        if search_text.startswith("re:"):
+        regex_text = ''
+        if search_text.startswith('re:'):
             use_regex = True
             regex_text = search_text[3:]
         scope = self.search_scope.currentText()
 
         for r in range(self.table.rowCount()):
             visible = True
-            # filters
-            if not row_matches_filters(r):
-                visible = False
+            rec = self.records[r] if r < len(self.records) else {}
+            # advanced
+            if self.advanced_filters:
+                if not check_advanced(rec):
+                    visible = False
+            # column filters
+            if visible and self.active_filters:
+                if not check_column_filters(r):
+                    visible = False
             # global search
-            if visible and search_text != "":
+            if visible and search_text != '':
                 table_ok = False
                 xml_ok = False
-                if scope in ("All", "Table only"):
-                    # search across visible table columns
+                if scope in ('All', 'Table only'):
                     for c in range(self.table.columnCount()):
                         item = self.table.item(r, c)
                         if item:
@@ -546,8 +647,8 @@ class MainWindow(QMainWindow):
                                 if search_text.lower() in txt.lower():
                                     table_ok = True
                                     break
-                if scope in ("All", "XML only"):
-                    raw = self.records[r].get("__raw_xml", "")
+                if scope in ('All', 'XML only'):
+                    raw = self.records[r].get('__raw_xml', '')
                     if use_regex:
                         try:
                             if re.search(regex_text, raw, re.IGNORECASE):
@@ -555,46 +656,174 @@ class MainWindow(QMainWindow):
                         except re.error:
                             xml_ok = False
                     else:
-                        if search_text.lower() in (raw or "").lower():
+                        if search_text.lower() in (raw or '').lower():
                             xml_ok = True
-                if scope == "Table only":
+                if scope == 'Table only':
                     visible = table_ok
-                elif scope == "XML only":
+                elif scope == 'XML only':
                     visible = xml_ok
                 else:
                     visible = (table_ok or xml_ok)
-            # set row hidden state
             self.table.setRowHidden(r, not visible)
 
-        # After filtering, apply suspicious highlighting for visible rows, and XML tree highlight if necessary
         self.apply_event_highlighting()
-        # For XML highlighting: if scope includes XML and search_text present, highlight currently shown tree if its event matches
-        # Get currently selected row and apply highlight_tree_matches for its xml
+
+        # highlight tree for current selection if search targets XML
         cur = self.table.currentRow()
         if cur >= 0:
-            raw = self.records[cur].get("__raw_xml", "")
-            if search_text != "" and scope in ("All", "XML only"):
-                # apply regex or plain
+            raw = self.records[cur].get('__raw_xml', '')
+            if search_text != '' and scope in ('All', 'XML only'):
                 if use_regex:
                     highlight_tree_matches(self.xml_tree, regex_text, use_regex=True)
                 else:
                     highlight_tree_matches(self.xml_tree, search_text, use_regex=False)
             else:
-                # clear highlights
-                highlight_tree_matches(self.xml_tree, "", use_regex=False)
+                highlight_tree_matches(self.xml_tree, '', use_regex=False)
+
+    def evaluate_rule(self, field_val, op, val, val2, field_name):
+        fv = field_val or ''
+        # numeric EventID comparisons
+        if field_name.lower() in ('eventid', 'event id'):
+            try:
+                fv_n = int(re.sub(r'\D', '', fv)) if fv else 0
+            except Exception:
+                fv_n = 0
+            try:
+                v_n = int(val)
+            except Exception:
+                return False
+            try:
+                v2_n = int(val2) if val2 else None
+            except Exception:
+                v2_n = None
+            if op == '=':
+                return fv_n == v_n
+            if op == '!=':
+                return fv_n != v_n
+            if op == '>':
+                return fv_n > v_n
+            if op == '<':
+                return fv_n < v_n
+            if op == '>=':
+                return fv_n >= v_n
+            if op == '<=':
+                return fv_n <= v_n
+            if op == 'between':
+                if v2_n is None:
+                    return False
+                return v_n <= fv_n <= v2_n
+            if op == 'regex':
+                try:
+                    return re.search(val, fv, re.IGNORECASE) is not None
+                except re.error:
+                    return False
+            if op == 'contains':
+                return val.lower() in fv.lower()
+            if op == 'startswith':
+                return fv.lower().startswith(val.lower())
+            if op == 'endswith':
+                return fv.lower().endswith(val.lower())
+        # date/time comparisons
+        elif field_name.lower() in ('timecreated', 'time', 'timestamp', 'date'):
+            try:
+                if fv:
+                    fv_dt = None
+                    try:
+                        fv_dt = datetime.fromisoformat(fv.replace('Z', '+00:00'))
+                    except Exception:
+                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                            try:
+                                fv_dt = datetime.strptime(fv, fmt)
+                                break
+                            except Exception:
+                                pass
+                    if fv_dt is None:
+                        return False
+                else:
+                    return False
+                # parse target(s)
+                if op in ('>', '<', '>=', '<=', '=', '!='):
+                    try:
+                        v_dt = datetime.fromisoformat(val.replace('Z', '+00:00'))
+                    except Exception:
+                        try:
+                            v_dt = datetime.fromisoformat(val)
+                        except Exception:
+                            return False
+                    if op == '>':
+                        return fv_dt > v_dt
+                    if op == '<':
+                        return fv_dt < v_dt
+                    if op == '>=':
+                        return fv_dt >= v_dt
+                    if op == '<=':
+                        return fv_dt <= v_dt
+                    if op == '=':
+                        return fv_dt == v_dt
+                    if op == '!=':
+                        return fv_dt != v_dt
+                if op == 'between':
+                    try:
+                        v1 = datetime.fromisoformat(val.replace('Z', '+00:00'))
+                        v2 = datetime.fromisoformat(val2.replace('Z', '+00:00'))
+                        return v1 <= fv_dt <= v2
+                    except Exception:
+                        return False
+                if op == 'regex':
+                    try:
+                        return re.search(val, fv, re.IGNORECASE) is not None
+                    except re.error:
+                        return False
+                if op == 'contains':
+                    return val.lower() in fv.lower()
+                return False
+            except Exception:
+                return False
+        else:
+            # string comparisons
+            if op == '=':
+                return fv.lower() == val.lower()
+            if op == '!=':
+                return fv.lower() != val.lower()
+            if op == 'contains':
+                return val.lower() in fv.lower()
+            if op == 'startswith':
+                return fv.lower().startswith(val.lower())
+            if op == 'endswith':
+                return fv.lower().endswith(val.lower())
+            if op == 'regex':
+                try:
+                    return re.search(val, fv, re.IGNORECASE) is not None
+                except re.error:
+                    return False
+            # fallback numeric compare
+            try:
+                fv_n = float(fv)
+                v_n = float(val)
+                if op == '>':
+                    return fv_n > v_n
+                if op == '<':
+                    return fv_n < v_n
+                if op == '>=':
+                    return fv_n >= v_n
+                if op == '<=':
+                    return fv_n <= v_n
+            except Exception:
+                pass
+        return False
 
     def _match_filter(self, cell_text, ftype, fval):
         if cell_text is None:
-            cell_text = ""
-        if ftype == "Contains":
+            cell_text = ''
+        if ftype == 'Contains':
             return fval.lower() in cell_text.lower()
-        elif ftype == "Equals":
+        elif ftype == 'Equals':
             return cell_text.lower() == fval.lower()
-        elif ftype == "Starts with":
+        elif ftype == 'Starts with':
             return cell_text.lower().startswith(fval.lower())
-        elif ftype == "Ends with":
+        elif ftype == 'Ends with':
             return cell_text.lower().endswith(fval.lower())
-        elif ftype == "Regex":
+        elif ftype == 'Regex':
             try:
                 return re.search(fval, cell_text, re.IGNORECASE) is not None
             except re.error:
@@ -602,7 +831,7 @@ class MainWindow(QMainWindow):
         return False
 
     # ---------------------------
-    # Loading (same as before)
+    # Loading events (channel or file)
     # ---------------------------
     def load_channel(self):
         channel = self.channel_combo.currentText()
@@ -639,7 +868,7 @@ class MainWindow(QMainWindow):
         self.export_btn.setEnabled(True)
 
     # ---------------------------
-    # On read finished -> parse and populate table
+    # Read finished: parse XML and populate table
     # ---------------------------
     def _on_read_finished(self, records):
         self.records = records or []
@@ -651,7 +880,7 @@ class MainWindow(QMainWindow):
             parsed_records.append(parsed)
         self.records = parsed_records
 
-        # Build headers
+        # Build columns based on union of keys
         keys_union = set()
         for r in self.records:
             keys_union.update(k for k in r.keys() if k != "__raw_xml")
@@ -693,17 +922,15 @@ class MainWindow(QMainWindow):
         self.load_file_btn.setEnabled(True)
         self.export_btn.setEnabled(True)
         self.xml_tree.clear()
-        # Apply highlighting to all rows initially
         self.apply_event_highlighting()
 
     # ---------------------------
-    # Row interactions
+    # Row click / double click
     # ---------------------------
     def on_row_clicked(self, row, col):
         if 0 <= row < len(self.records):
             raw = self.records[row].get("__raw_xml", "")
             populate_tree_from_xml(self.xml_tree, raw, expand_level=1)
-            # If there's an active global search that targets XML, highlight matches
             search_text = self.search_edit.text().strip()
             if search_text.startswith("re:"):
                 highlight_tree_matches(self.xml_tree, search_text[3:], use_regex=True)
@@ -724,31 +951,38 @@ class MainWindow(QMainWindow):
                 pretty = "\n".join([line for line in pretty.splitlines() if line.strip() != ""])
             except Exception:
                 pass
-            dlg = XmlDialog(pretty, self)
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Event XML (detail)")
+            dlg.setModal(True)
+            v = QVBoxLayout(dlg)
+            te = QTextEdit()
+            te.setReadOnly(True)
+            te.setPlainText(pretty)
+            v.addWidget(te)
+            btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            v.addWidget(btns)
+            btns.rejected.connect(dlg.reject)
+            dlg.resize(900, 600)
             dlg.exec()
 
     # ---------------------------
-    # Highlight suspicious events (C)
+    # Highlight suspicious events
     # ---------------------------
     def apply_event_highlighting(self):
-        # iterate rows; if row visible and EventID in suspicious_map -> color row
         for r in range(self.table.rowCount()):
             hidden = self.table.isRowHidden(r)
-            eid = ""
-            # try to obtain EventID from header_keys
+            eid = ''
             for idx, key in enumerate(self.header_keys):
-                if key.lower() in ("eventid", "event id"):
+                if key.lower() in ('eventid', 'event id'):
                     try:
                         eid = self.table.item(r, idx).text()
                     except Exception:
-                        eid = ""
+                        eid = ''
                     break
-            # If eid may contain non-digits, strip
             eid_str = eid.strip()
             color = None
             if eid_str in self.suspicious_map:
                 color = self.suspicious_map[eid_str]
-            # Apply color if row visible
             for c in range(self.table.columnCount()):
                 it = self.table.item(r, c)
                 if it is None:

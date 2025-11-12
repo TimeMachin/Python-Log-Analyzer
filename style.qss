@@ -1,0 +1,70 @@
+QWidget{ 
+    background-color: #151617; 
+    color: #e6e6e6; 
+    font-family: "Segoe UI", sans-serif; 
+    font-size: 10pt; 
+}
+QDialog{ 
+    background-color: #151617; 
+    color: #e6e6e6; 
+    border: 1px solid #2a2d31; 
+}
+QDialog QPushButton{ 
+    background-color: #2a2d31; 
+    border: 1px solid #333; 
+    padding: 6px 12px; 
+    border-radius: 6px; 
+}
+QDialog QPushButton:hover { 
+    background-color: #32363b; 
+}
+QTableWidget{ 
+    background-color: #1f2124; 
+}
+QHeaderView::section{ 
+    background-color: #2a2d31; 
+    padding: 6px; 
+    border: 1px solid #222; 
+    color: #cfd6dc; 
+}
+QPushButton{ 
+    background-color: #2a2d31; 
+    border: 1px solid #333; 
+    padding: 6px 10px; 
+    border-radius: 6px; 
+}
+QPushButton:hover{ 
+    background-color: #32363b; 
+}
+QLineEdit, QComboBox{ 
+    background-color: #202427; 
+    border: 1px solid #2f3336; 
+    padding: 6px; 
+    border-radius: 6px; 
+}
+QTreeWidget, QTextEdit{ 
+    background-color: #0f1112; 
+    border: 1px solid #252728; 
+    padding: 6px; 
+    font-family: "Consolas", monospace; 
+    font-size: 10pt; 
+    color: #dfeffb; 
+    border-radius: 6px; 
+}
+QProgressBar{ 
+    border: 1px solid #2b2d31; 
+    background-color: #171819; 
+    text-align: center; 
+}
+QProgressBar::chunk{ 
+    background-color: #0aa3e6; 
+}
+QDialogButtonBox QPushButton{ 
+    background-color: #2a2d31; 
+    border: 1px solid #333; 
+    padding: 6px 12px; 
+    border-radius: 6px; 
+}
+QDialogButtonBox QPushButton:hover{ 
+    background-color: #32363b; 
+}
