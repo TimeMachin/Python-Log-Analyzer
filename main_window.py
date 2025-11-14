@@ -44,6 +44,8 @@ except Exception:
 # ---------------------------
 # Helpers
 # ---------------------------
+# Creates a temporary copy of a file to avoid issues with locked or in-use event log files
+# Returns the full path to the temporary copy
 def safe_copy_to_temp(path):
     dest_dir = tempfile.gettempdir()
     base = os.path.basename(path)
@@ -54,6 +56,8 @@ def safe_copy_to_temp(path):
 # ---------------------------
 # Reader verification, either function or module
 # ---------------------------
+# Worker class that runs on a separate thread to read event log files or channels
+# Emits signals when finished or encounters errors to update the main UI safely
 class ReaderWorker(QObject):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
@@ -63,6 +67,9 @@ class ReaderWorker(QObject):
         self.path_or_channel = path_or_channel
         self.max_events = max_events
 
+    # Executes the event log reading operation on a separate thread
+    # Detects if input is a file path or channel name and reads accordingly
+    # Emits finished signal with event records or error signal if something goes wrong
     def run(self):
         try:
             p = self.path_or_channel
@@ -86,7 +93,7 @@ class ReaderWorker(QObject):
                 self.error.emit("No available file reader. Install python-evtx or provide read_evtx_summary.")
                 return
             else:
-                # channel name -> map to System32\winevt\Logs\<channel>.evtx
+                # channel name -> map to System32\winevt\Logs\<channel>.evtx (3 main options)
                 system_root = os.environ.get("SystemRoot", r"C:\Windows")
                 candidate = os.path.join(system_root, "System32", "winevt", "Logs", f"{p}.evtx")
                 if not os.path.exists(candidate):
@@ -116,6 +123,9 @@ class ReaderWorker(QObject):
 # ---------------------------
 # XML tree population
 # ---------------------------
+# Recursively converts an XML element and its children into a tree structure for display
+# Shows attributes, text content, and child elements with proper hierarchy
+# Automatically expands items up to the specified expand_level
 def add_xml_element_to_tree(tree_parent, element, level=0, expand_level=1):
     tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
     item = QTreeWidgetItem([f"<{tag}>"])
@@ -136,7 +146,8 @@ def add_xml_element_to_tree(tree_parent, element, level=0, expand_level=1):
         item.setExpanded(True)
     return item
 
-# Parse the XML tree with the raw data
+# Parses XML text and displays it as a tree in the tree widget
+# Handles XML parsing errors and removes xmlns attributes for cleaner display
 def populate_tree_from_xml(tree_widget, xml_text, expand_level=1):
     tree_widget.clear()
     if not xml_text:
@@ -157,7 +168,9 @@ def populate_tree_from_xml(tree_widget, xml_text, expand_level=1):
         top.child(i).setExpanded(True)
     tree_widget.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
 
-# Filter and search auxiliar highlight
+# Searches for matching text in the XML tree and highlights found items with yellow background
+# Expands parent items of matches for easy visibility
+# Supports both plain text and regex pattern matching (better not to use, as I wasnt able to optimize it well)
 def highlight_tree_matches(tree_widget, term, use_regex=False):
     if not term:
         def clear(item):
@@ -199,6 +212,9 @@ def highlight_tree_matches(tree_widget, term, use_regex=False):
 # ---------------------------
 # Modal FilterDialog for advanced filters
 # ---------------------------
+# Modal dialog that allows users to create complex filtering rules
+# Each rule consists of a field, operator, and one or two values for range-based operators
+# Supports operators like =, !=, >, <, contains, regex, between, etc. (Better use the normal ones, same problem with regex)
 class FilterDialog(QDialog):
     def __init__(self, parent=None, get_fields_callable=None):
         # Modal configuration
@@ -248,11 +264,14 @@ class FilterDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.rules = []     # rules counter list
 
+    # Returns the list of available fields for filtering
+    # Can use a custom callable or fall back to default field list
     def refresh_fields(self):
         if callable(self.get_fields_callable):
             return self.get_fields_callable()
         return ["Source", "EventID", "TimeCreated", "Level", "Message", "Computer"]
 
+    # Adds a new empty filter rule row to the table with dropdowns and text inputs
     def add_empty_rule(self):
         row = self.rules_table.rowCount()
         self.rules_table.insertRow(row)
@@ -272,6 +291,8 @@ class FilterDialog(QDialog):
         val2_edit.setProperty('dialoginput', True)
         self.rules_table.setCellWidget(row, 3, val2_edit)
 
+    # Extracts all filter rules from the dialog table and returns them as a list of dictionaries
+    # Skips empty rows and returns only complete rules with values
     def get_rules(self):
         rules = []
         for r in range(self.rules_table.rowCount()):
@@ -291,10 +312,12 @@ class FilterDialog(QDialog):
             rules.append({"field": field, "op": op, "value": val, "value2": val2})
         return rules
 
+    # Collects all rules and closes the dialog with acceptance status
     def on_apply(self):
         self.rules = self.get_rules()
         self.accept()
 
+    # Clears all filter rules from the table
     def on_clear(self):
         self.rules_table.setRowCount(0)
         self.rules = []
@@ -302,6 +325,9 @@ class FilterDialog(QDialog):
 # ---------------------------
 # Parse event XML to canonical dict (Source, EventID, TimeCreated, Level, Message, other EventData fields)
 # ---------------------------
+# Extracts event information from Windows Event Log XML format
+# Parses System section for provider, event ID, time, level, and computer
+# Also extracts Message and EventData fields for additional details
 def parse_event_xml_to_dict(xml_text):
     if not xml_text:
         return {}
@@ -385,7 +411,11 @@ def parse_event_xml_to_dict(xml_text):
 # ---------------------------
 # Main window
 # ---------------------------
+# Main application window that displays event logs in a table with XML tree view
+# Provides filtering, searching, export functionality, and event highlighting
 class MainWindow(QMainWindow):
+    # Initializes the main window UI with table, tree view, buttons, and all controls
+    # Sets up signal/slot connections and state variables for data management
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Windows Event Log Analyzer")
@@ -498,6 +528,8 @@ class MainWindow(QMainWindow):
     # ---------------------------
     # Header context menu
     # ---------------------------
+    # Shows a context menu when right-clicking on table column headers
+    # Allows filtering by selected cell value or clearing column filters
     def on_header_context_menu(self, pos):
         header = self.table.horizontalHeader()
         logical_index = header.logicalIndexAt(pos)
@@ -529,6 +561,8 @@ class MainWindow(QMainWindow):
     # ---------------------------
     # Open advanced Filters dialog (modal)
     # ---------------------------
+    # Opens the advanced filter dialog and applies selected rules to filter the event table
+    # Changes filter button color when filters are active
     def open_filters_dialog(self):
         dlg = FilterDialog(self, get_fields_callable=self.get_available_fields)
         dlg.refresh_fields()
@@ -566,6 +600,8 @@ class MainWindow(QMainWindow):
                 self.filters_btn.setStyleSheet('')
             self.apply_filters_and_search()
 
+    # Returns a list of all available fields from loaded records for use in filter rules
+    # Prioritizes canonical columns and removes duplicates
     def get_available_fields(self):
         fields = list(self.header_keys)
         for c in self.canonical_cols:
@@ -582,9 +618,13 @@ class MainWindow(QMainWindow):
     # ---------------------------
     # Search & filters orchestration
     # ---------------------------
+    # Triggered when search text changes; applies all filters and search terms
     def on_search_changed(self, txt):
         self.apply_filters_and_search()
 
+    # Main filtering and search orchestration method
+    # Applies advanced filters, column filters, and global search to show/hide table rows
+    # Supports regex patterns with 're:' prefix and different search scopes (All, Table only, XML only)
     def apply_filters_and_search(self):
         def check_advanced(rec):
             for rule in self.advanced_filters:
@@ -680,6 +720,9 @@ class MainWindow(QMainWindow):
             else:
                 highlight_tree_matches(self.xml_tree, '', use_regex=False)
 
+    # Evaluates a single filter rule against a field value
+    # Handles different operators (=, !=, >, <, contains, regex, between, etc.)
+    # Supports special comparison types for numeric EventIDs and datetime fields
     def evaluate_rule(self, field_val, op, val, val2, field_name):
         fv = field_val or ''
         # numeric EventID comparisons
@@ -812,6 +855,7 @@ class MainWindow(QMainWindow):
                 pass
         return False
 
+    # Tests if a cell value matches a column filter of a given type (Contains, Equals, Starts with, etc.)
     def _match_filter(self, cell_text, ftype, fval):
         if cell_text is None:
             cell_text = ''
@@ -833,10 +877,12 @@ class MainWindow(QMainWindow):
     # ---------------------------
     # Loading events (channel or file)
     # ---------------------------
+    # Reads events from the selected Windows event log channel (Application, System, Security)
     def load_channel(self):
         channel = self.channel_combo.currentText()
         self._start_read(channel)
 
+    # Opens a file dialog to select an .evtx file and loads events from it
     def load_from_file(self):
         default_dir = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "winevt", "Logs")
         path, _ = QFileDialog.getOpenFileName(self, "Select EVTX", default_dir, "Event Log Files (*.evtx)")
@@ -844,6 +890,8 @@ class MainWindow(QMainWindow):
             return
         self._start_read(path)
 
+    # Starts the event reading operation in a separate thread to avoid UI freezing
+    # Disables UI controls during reading and shows status
     def _start_read(self, path_or_channel):
         self.load_btn.setEnabled(False)
         self.load_file_btn.setEnabled(False)
@@ -860,6 +908,7 @@ class MainWindow(QMainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
 
+    # Handles errors during event log reading and displays error message to user
     def _on_read_error(self, msg):
         self._set_status("Error")
         QMessageBox.critical(self, "Read error", str(msg))
@@ -870,6 +919,8 @@ class MainWindow(QMainWindow):
     # ---------------------------
     # Read finished: parse XML and populate table
     # ---------------------------
+    # Processes loaded event records, parses XML, and populates the table with event data
+    # Dynamically determines columns based on union of all record fields
     def _on_read_finished(self, records):
         self.records = records or []
         parsed_records = []
@@ -939,6 +990,7 @@ class MainWindow(QMainWindow):
             else:
                 highlight_tree_matches(self.xml_tree, "", use_regex=False)
 
+    # Opens a modal dialog showing the full formatted XML of the double-clicked event for detailed inspection
     def on_row_double_clicked(self, row, col):
         if 0 <= row < len(self.records):
             raw = self.records[row].get("__raw_xml", "")
@@ -968,6 +1020,8 @@ class MainWindow(QMainWindow):
     # ---------------------------
     # Highlight suspicious events
     # ---------------------------
+    # Applies background color highlighting to rows with suspicious/high-risk event IDs
+    # Uses a predefined map of event ID to color for visual identification
     def apply_event_highlighting(self):
         for r in range(self.table.rowCount()):
             hidden = self.table.isRowHidden(r)
@@ -995,9 +1049,12 @@ class MainWindow(QMainWindow):
     # ---------------------------
     # Utilities
     # ---------------------------
+    # Updates the status label text in the main window
     def _set_status(self, text):
         self.status_label.setText(text)
 
+    # Exports currently loaded and visible event records to a CSV file
+    # Handles special characters and newlines in field values for proper CSV formatting (Just the simple one, the other was too weird)
     def export_csv(self):
         if not self.records or not self.header_keys:
             QMessageBox.information(self, "No data", "No records to export.")
